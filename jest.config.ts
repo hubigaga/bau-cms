@@ -2,10 +2,13 @@
 import type { Config } from 'jest'
 
 const config: Config = {
-  testEnvironment: 'node',
+  testEnvironment: 'jsdom',
   transform: { '^.+\\.tsx?$': ['ts-jest', {}] },
   moduleNameMapper: { '^@/(.*)$': '<rootDir>/$1' },
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
-  testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
+  testMatch: [
+    '**/__tests__/**/*.test.{ts,tsx}',
+    '**/*.test.{ts,tsx}',
+  ],
 }
 export default config
