@@ -46,17 +46,46 @@ Der Worker greift direkt auf die Prisma-DB zu und läuft unabhängig von Next.js
 ```
 /root/bau-cms/
   app/              ← Next.js App Router (Pages + API Routes)
-  worker/           ← worker.ts (PM2-Prozess für Background-Jobs)
+  worker/           ← worker.ts (Background Worker)
   prisma/           ← Schema + Migrationen + seed.ts (SKR03)
-  data/             ← cms.db (SQLite-Datenbank)
-  uploads/          ← Lokale Dateiablage (nie als statische Assets!)
+  data/             ← cms.db (SQLite, Docker Volume)
+  uploads/          ← Lokale Dateiablage (Docker Volume, nie statisch!)
     projects/       ← Dateien nach Projekt-ID
     customers/      ← Dateien nach Kunden-ID
     misc/           ← Allgemeine Dateien
-  backups/          ← SQLite-Backups (max. 30 Dateien, dann rotieren)
+  backups/          ← SQLite-Backups (Docker Volume, max. 30 Dateien)
   public/           ← Statische Assets (keine Uploads hier)
   docs/             ← Dokumentation
+  Dockerfile        ← Multi-stage Build (builder + runner)
+  docker-compose.yml          ← Production (cms + cms-worker + caddy)
+  docker-compose.override.yml ← Dev (Hot Reload)
+  Caddyfile         ← Reverse Proxy Konfiguration
+  .env.example      ← Vorlage für Umgebungsvariablen
 ```
+
+### Docker Deployment
+
+**Drei Services in `docker-compose.yml`:**
+- `cms` — Next.js App, Port 3000 (intern), basiert auf `Dockerfile`
+- `cms-worker` — Background Worker (gleiche Image, anderer Entrypoint: `node worker/index.js`)
+- `caddy` — Reverse Proxy, Port 80/443 (extern)
+
+**Volumes (alle persistiert):**
+- `./data:/app/data` — SQLite-Datenbank
+- `./uploads:/app/uploads` — Dateiablage
+- `./backups:/app/backups` — Backups
+
+**Dockerfile (Multi-stage):**
+1. `builder`: `node:20-alpine`, `npm ci`, `npm run build`, `prisma generate`
+2. `runner`: `node:20-alpine`, nur Production-Artefakte, kein Dev-Overhead
+
+**Start:** `docker compose up -d` — fertig.
+
+### GitHub Repository
+
+- Öffentliches Repo: `bau-cms` (via `gh repo create`)
+- `.gitignore` enthält: `.env.local`, `data/`, `uploads/`, `backups/`, `.next/`, `node_modules/`
+- `.env.example` mit allen benötigten Variablen (ohne Werte) wird committed
 
 ### Dateizugriff & Sicherheit
 
