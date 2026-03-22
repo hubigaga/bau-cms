@@ -163,7 +163,7 @@ DATABASE_URL="file:./data/cms.db"
 NEXTAUTH_SECRET="change-me-to-a-random-32-char-string"
 NEXTAUTH_URL="https://yourdomain.com"
 ADMIN_USERNAME="admin"
-ADMIN_PASSWORD_HASH="bcrypt-hash-of-your-password"
+ADMIN_PASSWORD="changeme"
 
 # IMAP (eingehende E-Mails)
 IMAP_HOST="imap.example.com"
@@ -194,7 +194,7 @@ const config: Config = {
   testEnvironment: 'node',
   transform: { '^.+\\.tsx?$': 'ts-jest' },
   moduleNameMapper: { '^@/(.*)$': '<rootDir>/$1' },
-  setupFilesAfterFramework: ['<rootDir>/jest.setup.ts'],
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
 }
 export default config
@@ -1912,7 +1912,20 @@ git push
 
 Sections:
 - **IMAP/SMTP:** Shows current env vars (masked), instructions to edit `.env.local`
-- **Admin Passwort ändern:** Form that `PUT`s new bcrypt hash to a `PUT /api/auth/password` route
+- **Admin Passwort ändern:** Form that `PUT`s to `PUT /api/auth/password` — create this route in `app/api/auth/password/route.ts`:
+  ```typescript
+  export async function PUT(req: Request) {
+    const session = await getServerSession(authOptions)
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { currentPassword, newPassword } = await req.json()
+    const user = await prisma.user.findUnique({ where: { username: session.user!.name! } })
+    if (!user || !await bcrypt.compare(currentPassword, user.password))
+      return NextResponse.json({ error: 'Falsches Passwort' }, { status: 403 })
+    const hash = await bcrypt.hash(newPassword, 12)
+    await prisma.user.update({ where: { id: user.id }, data: { password: hash } })
+    return new NextResponse(null, { status: 204 })
+  }
+  ```
 - **Datenbank:** Show DB file size, last backup date, manual backup button
 
 - [ ] **Step 2: Wire file attachment in project detail tabs**
