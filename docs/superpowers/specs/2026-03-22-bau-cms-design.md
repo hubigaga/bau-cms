@@ -24,29 +24,49 @@ Ein browserbasiertes CMS für einen Einzelnutzer (Inhaber eines kleinen Bauunter
 | E-Mail eingehend | imapflow (IMAP-Polling alle 2 Min.) |
 | E-Mail ausgehend | nodemailer (SMTP) |
 | PDF-Generierung | @react-pdf/renderer |
-| Prozessmanagement | PM2 |
+| Prozessmanagement | PM2 (2 Prozesse: Next.js + Worker) |
 | Reverse Proxy | Caddy (bereits auf Server vorhanden) |
+
+### Prozesse
+
+Das System besteht aus **zwei PM2-Prozessen**:
+
+1. **`cms`** — Next.js App auf Port 3000 (UI + API Routes)
+2. **`cms-worker`** — `worker.ts` (separater Node.js-Prozess für Background-Jobs)
+
+Der Worker ist verantwortlich für:
+- IMAP-Polling alle 2 Minuten (neue E-Mails in DB speichern)
+- OVERDUE-Check täglich um 06:00 Uhr (Rechnungen mit überschrittenem dueDate → Status OVERDUE)
+- SQLite-Backup täglich um 03:00 Uhr (letzte 30 Backups behalten, ältere löschen)
+
+Der Worker greift direkt auf die Prisma-DB zu und läuft unabhängig von Next.js.
 
 ### Deployment-Struktur
 
 ```
 /root/bau-cms/
   app/              ← Next.js App Router (Pages + API Routes)
-  prisma/           ← Schema + Migrationen
+  worker/           ← worker.ts (PM2-Prozess für Background-Jobs)
+  prisma/           ← Schema + Migrationen + seed.ts (SKR03)
   data/             ← cms.db (SQLite-Datenbank)
-  uploads/          ← Lokale Dateiablage
+  uploads/          ← Lokale Dateiablage (nie als statische Assets!)
     projects/       ← Dateien nach Projekt-ID
     customers/      ← Dateien nach Kunden-ID
     misc/           ← Allgemeine Dateien
-  public/           ← Statische Assets
+  backups/          ← SQLite-Backups (max. 30 Dateien, dann rotieren)
+  public/           ← Statische Assets (keine Uploads hier)
   docs/             ← Dokumentation
 ```
 
-### Deployment
+### Dateizugriff & Sicherheit
 
-- Next.js läuft als PM2-Prozess auf Port 3000
-- Caddy terminiert HTTPS und proxied auf Port 3000
-- SQLite-Backup: täglicher Cron-Job (`cp data/cms.db backups/cms-$(date +%Y%m%d).db`)
+`/uploads/` wird **nicht** als statisches Verzeichnis exponiert. Alle Dateien werden ausschließlich über die API-Route `GET /api/files/[id]/download` ausgeliefert, die zuerst die NextAuth-Session prüft. Caddy erhält keinen direkten Zugriff auf `/uploads/`.
+
+### Backup-Strategie
+
+- Worker führt täglich um 03:00 Uhr aus: `cp data/cms.db backups/cms-YYYYMMDD.db`
+- Nach dem Backup werden Backups gelöscht, die älter als 30 Tage sind
+- Retention: maximal 30 Backup-Dateien
 
 ---
 
@@ -150,7 +170,7 @@ model TimeEntry {
 model File {
   id         String   @id @default(cuid())
   filename   String
-  path       String
+  path       String   // relativ zu /uploads/, z.B. "projects/abc123/plan.pdf"
   mimetype   String
   size       Int
   uploadedAt DateTime @default(now())
@@ -158,10 +178,14 @@ model File {
   project    Project?  @relation(fields: [projectId], references: [id])
   customerId String?
   customer   Customer? @relation(fields: [customerId], references: [id])
+  invoiceId  String?
+  invoice    Invoice?  @relation(fields: [invoiceId], references: [id])
 }
 ```
 
 ### E-Mail
+
+E-Mails werden als **sanitisiertes HTML** gespeichert (HTML-Mails) oder als Plain-Text (falls kein HTML-Teil vorhanden). Rendering im UI via `dangerouslySetInnerHTML` mit DOMPurify-Sanitization clientseitig.
 
 ```prisma
 model Email {
@@ -169,7 +193,8 @@ model Email {
   subject    String
   fromAddr   String
   toAddr     String
-  body       String
+  body       String        // sanitisiertes HTML oder Plain-Text
+  bodyType   String        @default("text") // "html" | "text"
   direction  EmailDirection
   sentAt     DateTime
   isRead     Boolean       @default(false)
@@ -215,30 +240,36 @@ model JournalEntry {
   creditAccountId String
   creditAccount   Account  @relation("CreditAccount", fields: [creditAccountId], references: [id])
   invoiceId       String?
-  invoice         Invoice? @relation(fields: [invoiceId], references: [id])
+  invoice         Invoice? @relation("InvoiceJournalEntries", fields: [invoiceId], references: [id])
+  paymentId       String?
+  payment         Payment? @relation(fields: [paymentId], references: [id])
   createdAt       DateTime @default(now())
 }
 
 model Invoice {
-  id            String        @id @default(cuid())
-  type          InvoiceType
-  number        String        @unique
-  date          DateTime
-  dueDate       DateTime?
-  status        InvoiceStatus @default(DRAFT)
-  subtotal      Float
-  vatRate       Float         @default(19)
-  vatAmount     Float
-  total         Float
-  notes         String?
-  customerId    String
-  customer      Customer      @relation(fields: [customerId], references: [id])
-  projectId     String?
-  project       Project?      @relation(fields: [projectId], references: [id])
-  items         InvoiceItem[]
-  payments      Payment[]
-  journalEntries JournalEntry[]
-  createdAt     DateTime      @default(now())
+  id              String        @id @default(cuid())
+  type            InvoiceType
+  number          String        @unique
+  date            DateTime
+  dueDate         DateTime?
+  status          InvoiceStatus @default(DRAFT)
+  subtotal        Float
+  vatRate         Float         @default(19)
+  vatAmount       Float
+  total           Float
+  notes           String?
+  sourceOfferId   String?       // gesetzt wenn aus Angebot konvertiert
+  sourceOffer     Invoice?      @relation("OfferToInvoice", fields: [sourceOfferId], references: [id])
+  convertedInvoice Invoice[]    @relation("OfferToInvoice")
+  customerId      String
+  customer        Customer      @relation(fields: [customerId], references: [id])
+  projectId       String?
+  project         Project?      @relation(fields: [projectId], references: [id])
+  items           InvoiceItem[]
+  payments        Payment[]
+  journalEntries  JournalEntry[] @relation("InvoiceJournalEntries")
+  files           File[]
+  createdAt       DateTime      @default(now())
 }
 
 enum InvoiceType {
@@ -260,19 +291,26 @@ model InvoiceItem {
   description String
   quantity    Float
   unitPrice   Float
+  total       Float   // quantity * unitPrice, gespeichert zur Unveränderlichkeit
+  vatRate     Float?  // falls abweichend vom Rechnungs-vatRate (z.B. 7%)
   invoiceId   String
   invoice     Invoice @relation(fields: [invoiceId], references: [id])
 }
 
 model Payment {
-  id        String   @id @default(cuid())
-  amount    Float
-  date      DateTime
-  method    String?
-  invoiceId String
-  invoice   Invoice  @relation(fields: [invoiceId], references: [id])
+  id             String         @id @default(cuid())
+  amount         Float
+  date           DateTime
+  method         String?
+  invoiceId      String
+  invoice        Invoice        @relation(fields: [invoiceId], references: [id])
+  journalEntries JournalEntry[] // Buchungssatz der durch diese Zahlung erzeugt wurde
 }
 ```
+
+### SKR03-Seed
+
+`prisma/seed.ts` lädt einen SKR03-Mindestkontenplan (ca. 30 Kernkonten) beim ersten `prisma db seed`. Wichtige Konten: 1200 (Bank), 1600 (Forderungen), 3400 (Verbindlichkeiten), 8400 (Erlöse 19%), 8300 (Erlöse 7%), 4... (Aufwandskonten). Der Kontenplan ist im System erweiterbar.
 
 ---
 
@@ -308,7 +346,7 @@ model Payment {
 
 ### Buchhaltung
 
-- **Kontenplan:** SKR03 vorgeladen, anpassbar
+- **Kontenplan:** SKR03 vorgeladen via Seed, erweiterbar
 - **Journal:** Alle Buchungssätze chronologisch
 - **Bilanz:** Aktiva/Passiva-Gegenüberstellung
 - **GuV:** Erträge vs. Aufwendungen
@@ -317,35 +355,42 @@ model Payment {
 ### Rechnungs-Workflow
 
 ```
-Angebot erstellen
-    → Als Rechnung markieren (Angebotsnummer → Rechnungsnummer)
+Angebot erstellen (type=ANGEBOT)
+    → Als Rechnung konvertieren:
+        - Neue Invoice (type=RECHNUNG, sourceOfferId=original.id)
+        - Neue Rechnungsnummer zugewiesen
+        - Original-Angebot bleibt unverändert
     → PDF generieren
     → Per E-Mail senden (öffnet Compose-Dialog vorausgefüllt)
-    → Zahlungseingang buchen
-        → Automatischer Buchungssatz:
-           SOLL: 1200 Bank / HABEN: 8400 Erlöse
-        → Rechnungsstatus → PAID
+    → Zahlungseingang buchen:
+        - Payment-Eintrag erstellen
+        - Automatischer JournalEntry:
+          SOLL: 1200 Bank / HABEN: 8400 Erlöse (netto)
+          SOLL: 1200 Bank / HABEN: 1766 MwSt (MwSt-Anteil)
+        - Payment.journalEntries verknüpft
+        - Rechnungsstatus → PAID
 ```
 
 ### Mahnwesen
 
-- Automatische Markierung als OVERDUE wenn dueDate überschritten
-- Mahnung per Knopfdruck: generiert Mahnschreiben-PDF, sendet per E-Mail
+- Worker prüft täglich: alle SENT-Rechnungen mit `dueDate < heute` → Status OVERDUE
+- Mahnung per Knopfdruck: generiert Mahnschreiben-PDF (via @react-pdf/renderer), sendet per E-Mail
+- Mahnschreiben-PDF wird als File-Eintrag mit `invoiceId` gespeichert
 
 ### E-Mail-Integration
 
-- **IMAP-Polling:** alle 2 Minuten via Background-Worker
+- **IMAP-Polling:** Worker alle 2 Minuten, neue Mails via `messageId` dedupliziert
 - **Posteingang:** alle empfangenen Mails, filterbar
 - **Compose:** neues Mail aus dem System, Empfänger aus Kundenstamm wählbar
-- **Zuordnung:** Mail einem Projekt oder Kunden zuordnen (bleibt dann in der Detailansicht sichtbar)
+- **Zuordnung:** Mail einem Projekt oder Kunden zuordnen
 
 ### Dateiablage
 
-- Upload via Drag & Drop
+- Upload via Drag & Drop (API Route: `POST /api/files`)
+- Auslieferung nur via `GET /api/files/[id]/download` (Auth-Check)
 - Vorschau für Bilder und PDFs
 - Filter nach Projekt/Kunde/Typ
-- Max. 50MB pro Datei
-- Dateityp-Validierung serverseitig
+- Max. 50MB pro Datei, Dateityp-Whitelist serverseitig
 
 ---
 
@@ -382,11 +427,13 @@ Angebot erstellen
 
 ## Sicherheit
 
-- NextAuth.js Session-basierte Auth
-- Alle API-Routes prüfen Session via Middleware
+- NextAuth.js Session-basierte Auth via `middleware.ts` (schützt alle Routen außer `/api/auth/*`)
+- Datei-Downloads: zusätzlicher `getServerSession()`-Check in der Route selbst
+- `/uploads/` ist kein statisches Verzeichnis, wird nicht von Caddy exponiert
 - Passwort in DB: bcrypt (cost factor 12)
-- File-Upload: Typ-Whitelist + Größenlimit serverseitig
-- IMAP/SMTP-Credentials in `.env.local` (nie im Code)
+- File-Upload: Typ-Whitelist + 50MB-Größenlimit serverseitig
+- IMAP/SMTP-Credentials in `.env.local` (nie im Code oder Git)
+- E-Mail-Body: serverseitig via `sanitize-html` bereinigt vor DB-Speicherung
 
 ---
 
