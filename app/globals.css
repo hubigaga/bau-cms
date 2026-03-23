@@ -1,27 +1,27 @@
+/* app/globals.css */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --bg-base: #0f1114;
+  --bg-surface: #1a1e24;
+  --bg-elevated: #222830;
+  --border: #2e3640;
+  --text-primary: #d4d8dd;
+  --text-muted: #7a8694;
+  --accent-blue: #6b8fa3;
+  --accent-gold: #c9a84c;
+  --success: #4a7c59;
+  --danger: #8b3a3a;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
+.font-mono-numbers {
+  font-family: 'JetBrains Mono', monospace;
 }

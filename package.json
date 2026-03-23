@@ -14,9 +14,11 @@
     "node": "^20.19 || ^22.12 || >=24.0"
   },
   "dependencies": {
+    "@prisma/adapter-better-sqlite3": "^7.5.0",
     "@prisma/client": "^7.5.0",
     "@react-pdf/renderer": "^4.3.2",
     "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.8.0",
     "imapflow": "^1.2.16",
     "lucide-react": "^0.577.0",
     "next": "14.2.35",
@@ -27,11 +29,15 @@
     "react-dom": "^18",
     "sanitize-html": "^2.17.2"
   },
+  "prisma": {
+    "seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts"
+  },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/bcryptjs": "^2.4.6",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/nodemailer": "^7.0.11",
     "@types/react": "^18",

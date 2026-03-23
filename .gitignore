@@ -44,3 +44,5 @@ backups/
 
 # git worktrees
 .worktrees/
+
+/app/generated/prisma

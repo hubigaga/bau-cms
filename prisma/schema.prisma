@@ -1,0 +1,232 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Customer {
+  id        String    @id @default(cuid())
+  name      String
+  address   String?
+  email     String?
+  phone     String?
+  notes     String?
+  createdAt DateTime  @default(now())
+  projects  Project[]
+  invoices  Invoice[]
+  emails    Email[]
+  files     File[]
+}
+
+model Employee {
+  id          String      @id @default(cuid())
+  name        String
+  email       String?
+  phone       String?
+  role        String?
+  projects    ProjectEmployee[]
+  timeEntries TimeEntry[]
+  tasks       Task[]
+}
+
+model Project {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  status      ProjectStatus @default(ACTIVE)
+  startDate   DateTime?
+  endDate     DateTime?
+  createdAt   DateTime  @default(now())
+  customerId  String
+  customer    Customer  @relation(fields: [customerId], references: [id])
+  employees   ProjectEmployee[]
+  tasks       Task[]
+  timeEntries TimeEntry[]
+  files       File[]
+  emails      Email[]
+  invoices    Invoice[]
+}
+
+enum ProjectStatus {
+  ACTIVE
+  COMPLETED
+  PAUSED
+  CANCELLED
+}
+
+model ProjectEmployee {
+  projectId  String
+  employeeId String
+  project    Project  @relation(fields: [projectId], references: [id])
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  @@id([projectId, employeeId])
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  title       String
+  description String?
+  status      TaskStatus @default(TODO)
+  dueDate     DateTime?
+  createdAt   DateTime   @default(now())
+  projectId   String
+  project     Project    @relation(fields: [projectId], references: [id])
+  assignedTo  String?
+  employee    Employee?  @relation(fields: [assignedTo], references: [id])
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+model TimeEntry {
+  id          String   @id @default(cuid())
+  hours       Float
+  date        DateTime
+  description String?
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id])
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+}
+
+model File {
+  id         String   @id @default(cuid())
+  filename   String
+  path       String
+  mimetype   String
+  size       Int
+  uploadedAt DateTime @default(now())
+  projectId  String?
+  project    Project?  @relation(fields: [projectId], references: [id])
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  invoiceId  String?
+  invoice    Invoice?  @relation(fields: [invoiceId], references: [id])
+}
+
+model Email {
+  id         String        @id @default(cuid())
+  subject    String
+  fromAddr   String
+  toAddr     String
+  body       String
+  bodyType   String        @default("text")
+  direction  EmailDirection
+  sentAt     DateTime
+  isRead     Boolean       @default(false)
+  messageId  String?       @unique
+  projectId  String?
+  project    Project?      @relation(fields: [projectId], references: [id])
+  customerId String?
+  customer   Customer?     @relation(fields: [customerId], references: [id])
+}
+
+enum EmailDirection {
+  IN
+  OUT
+}
+
+model Account {
+  id            String      @id @default(cuid())
+  number        String      @unique
+  name          String
+  type          AccountType
+  debitEntries  JournalEntry[] @relation("DebitAccount")
+  creditEntries JournalEntry[] @relation("CreditAccount")
+}
+
+enum AccountType {
+  AKTIV
+  PASSIV
+  ERTRAG
+  AUFWAND
+}
+
+model JournalEntry {
+  id              String   @id @default(cuid())
+  date            DateTime
+  description     String
+  amount          Float
+  debitAccountId  String
+  debitAccount    Account  @relation("DebitAccount", fields: [debitAccountId], references: [id])
+  creditAccountId String
+  creditAccount   Account  @relation("CreditAccount", fields: [creditAccountId], references: [id])
+  invoiceId       String?
+  invoice         Invoice? @relation("InvoiceJournalEntries", fields: [invoiceId], references: [id])
+  paymentId       String?
+  payment         Payment? @relation(fields: [paymentId], references: [id])
+  createdAt       DateTime @default(now())
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  type            InvoiceType
+  number          String        @unique
+  date            DateTime
+  dueDate         DateTime?
+  status          InvoiceStatus @default(DRAFT)
+  subtotal        Float
+  vatRate         Float         @default(19)
+  vatAmount       Float
+  total           Float
+  notes           String?
+  sourceOfferId   String?
+  sourceOffer     Invoice?      @relation("OfferToInvoice", fields: [sourceOfferId], references: [id])
+  convertedInvoice Invoice[]    @relation("OfferToInvoice")
+  customerId      String
+  customer        Customer      @relation(fields: [customerId], references: [id])
+  projectId       String?
+  project         Project?      @relation(fields: [projectId], references: [id])
+  items           InvoiceItem[]
+  payments        Payment[]
+  journalEntries  JournalEntry[] @relation("InvoiceJournalEntries")
+  files           File[]
+  createdAt       DateTime      @default(now())
+}
+
+enum InvoiceType {
+  ANGEBOT
+  RECHNUNG
+  GUTSCHRIFT
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  description String
+  quantity    Float
+  unitPrice   Float
+  total       Float
+  vatRate     Float?
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id])
+}
+
+model Payment {
+  id             String         @id @default(cuid())
+  amount         Float
+  date           DateTime
+  method         String?
+  invoiceId      String
+  invoice        Invoice        @relation(fields: [invoiceId], references: [id])
+  journalEntries JournalEntry[]
+}
+
+model User {
+  id       String @id @default(cuid())
+  username String @unique
+  password String
+}
